@@ -19,6 +19,15 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 import { config } from "./config.js";
+import { getDb, isMongoEnabled } from "./db.js";
+
+function useMongo() {
+  return isMongoEnabled() && getDb();
+}
+
+function kbCollection() {
+  return getDb().collection("knowledge_base");
+}
 
 // قفل بسيط لمنع تعارض الكتابة لو وصل طلبين بنفس اللحظة (Node واحد-thread
 // لكن الـ async I/O ممكن يتشابك بدون هذا)
@@ -40,6 +49,9 @@ async function ensureFile() {
 }
 
 async function readAll() {
+  if (useMongo()) {
+    return kbCollection().find({}).sort({ createdAt: 1 }).toArray();
+  }
   await ensureFile();
   const raw = await fs.readFile(config.knowledgeBaseFile, "utf8");
   try {
@@ -55,14 +67,20 @@ async function writeAll(entries) {
 }
 
 export async function addEntry(question, answer) {
+  const entry = {
+    id: crypto.randomUUID(),
+    question: question.trim(),
+    answer: answer.trim(),
+    createdAt: new Date().toISOString(),
+  };
+
+  if (useMongo()) {
+    await kbCollection().insertOne({ ...entry });
+    return entry;
+  }
+
   return withLock(async () => {
     const entries = await readAll();
-    const entry = {
-      id: crypto.randomUUID(),
-      question: question.trim(),
-      answer: answer.trim(),
-      createdAt: new Date().toISOString(),
-    };
     entries.push(entry);
     await writeAll(entries);
     return entry;
@@ -70,6 +88,11 @@ export async function addEntry(question, answer) {
 }
 
 export async function removeEntry(id) {
+  if (useMongo()) {
+    const result = await kbCollection().deleteOne({ id });
+    return result.deletedCount > 0;
+  }
+
   return withLock(async () => {
     const entries = await readAll();
     const filtered = entries.filter((e) => e.id !== id);
@@ -80,7 +103,9 @@ export async function removeEntry(id) {
 }
 
 export async function listEntries() {
-  return readAll();
+  const entries = await readAll();
+  // نزيل حقل _id الخاص بـ Mongo من المخرجات حتى تبقى الصيغة موحّدة
+  return entries.map(({ _id, ...rest }) => rest);
 }
 
 function tokenize(text) {

@@ -20,6 +20,8 @@ import { config, validateConfig } from "./config.js";
 import { handleIncomingMessage } from "./messageHandler.js";
 import * as botState from "./botState.js";
 import { startWebServer } from "./webServer.js";
+import { connectMongo, isMongoEnabled } from "./db.js";
+import { useMongoAuthState } from "./mongoAuthState.js";
 
 // وقت بدء تشغيل هذا السيرفر - أي رسالة "واصلة" بتاريخ أقدم من هذا (مع هامش
 // بسيط للتساهل مع فروق التوقيت) هي غالبًا backlog قديم يعيد WhatsApp تسليمه
@@ -34,17 +36,40 @@ const logger = pino({ level: "warn" });
 // تحتاج دائمًا أحدث نسخة منه لإرسال الرسائل اليدوية.
 let currentSock = null;
 
+// دالة مسح الجلسة (تُضبط حسب مصدر التخزين: Mongo أو ملفات)
+let clearAuthState = null;
+
 async function start() {
   validateConfig();
 
-  const loaded = botState.loadState();
+  // نتصل بـ Mongo أولًا (إن ضُبط MONGODB_URI) قبل تحميل أي حالة تعتمد عليه
+  if (isMongoEnabled()) {
+    await connectMongo();
+  }
+
+  const loaded = await botState.loadState();
 
   console.log("🔧 إعدادات الربط:");
   console.log(`   الطريقة: ${config.linkMethod === "qr" ? "QR Code" : "Pairing Code"}`);
-  console.log(`   مجلد الجلسة: ${config.authDir}`);
+  console.log(`   التخزين: ${isMongoEnabled() ? "MongoDB (جلسة دائمة)" : `ملفات محلية (${config.authDir})`}`);
   console.log(`   وضع البوت الحالي: ${loaded.mode === "away" ? "إيقاف (رسالة غياب فقط)" : "مُشغّل (رد ذكي)"}`);
 
-  const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
+  let state, saveCreds;
+  if (isMongoEnabled()) {
+    const mongoAuth = await useMongoAuthState(
+      (await connectMongo()),
+      process.env.WHATSAPP_SESSION_ID || "default"
+    );
+    state = mongoAuth.state;
+    saveCreds = mongoAuth.saveCreds;
+    clearAuthState = mongoAuth.clearState;
+  } else {
+    const fileAuth = await useMultiFileAuthState(config.authDir);
+    state = fileAuth.state;
+    saveCreds = fileAuth.saveCreds;
+    clearAuthState = null;
+  }
+
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -96,8 +121,16 @@ async function start() {
 
       if (loggedOut) {
         console.log(
-          "\n🔴 تم تسجيل الخروج من الحساب (loggedOut). احذف مجلد الجلسة وأعد الربط من جديد."
+          "\n🔴 تم تسجيل الخروج من الحساب (loggedOut)."
         );
+        // نمسح الجلسة المحفوظة (Mongo أو ملفات) حتى تبدأ إعادة ربط نظيفة
+        if (clearAuthState) {
+          clearAuthState()
+            .then(() => console.log("🧹 مُسحت جلسة Mongo. أعد النشر/التشغيل للحصول على QR جديد."))
+            .catch((e) => console.error("⚠️ فشل مسح جلسة Mongo:", e.message));
+        } else {
+          console.log("   احذف مجلد الجلسة وأعد الربط من جديد.");
+        }
       } else {
         console.log(`\n🟡 انقطع الاتصال (سبب: ${statusCode || "غير معروف"}). إعادة المحاولة...`);
         start();

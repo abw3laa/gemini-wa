@@ -43,9 +43,9 @@ export function startWebServer(getSock) {
   });
 
   // تغيير الوضع: { mode: "away" | "active" }
-  app.post("/api/mode", (req, res) => {
+  app.post("/api/mode", async (req, res) => {
     try {
-      const state = botState.setMode(req.body.mode);
+      const state = await botState.setMode(req.body.mode);
       console.log(`🔀 تغيّر وضع البوت إلى: ${state.mode}`);
       res.json({ ok: true, state });
     } catch (err) {
@@ -54,9 +54,9 @@ export function startWebServer(getSock) {
   });
 
   // تعديل رسالة الغياب: { message: "..." }
-  app.post("/api/away-message", (req, res) => {
+  app.post("/api/away-message", async (req, res) => {
     try {
-      const state = botState.setAwayMessage(req.body.message);
+      const state = await botState.setAwayMessage(req.body.message);
       console.log("✏️ تم تعديل رسالة الغياب.");
       res.json({ ok: true, state });
     } catch (err) {
