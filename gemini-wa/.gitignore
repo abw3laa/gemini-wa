@@ -1,0 +1,21 @@
+# Secrets - لا يجب أن تُرفع أبدًا
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+*.egg-info/
+
+# مستقبلًا (Phase 3+)
+whatsapp-session/
+node_modules/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

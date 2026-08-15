@@ -1,0 +1,17 @@
+{
+  "name": "whatsapp-service",
+  "version": "0.3.0",
+  "description": "خدمة WhatsApp عبر Baileys - Phase 3 (ربط الحساب فقط، بدون Gemini بعد)",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "@hapi/boom": "^10.0.1",
+    "pino": "^9.5.0",
+    "qrcode-terminal": "^0.12.0",
+    "dotenv": "^16.4.5"
+  }
+}

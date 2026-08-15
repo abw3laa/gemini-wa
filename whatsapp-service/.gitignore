@@ -1,0 +1,20 @@
+# الجلسة - أهم شيء بهذا الملف. لا يجب أن يُرفع أبدًا على GitHub
+auth_info_baileys/
+*.session
+
+# Secrets
+.env
+*.env
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Phase 10: قاعدة المعرفة - بيانات شخصية، ما ترفعها لـ GitHub
+data/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

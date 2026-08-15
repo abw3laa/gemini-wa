@@ -1,0 +1,32 @@
+# Phase 12: تشغيل الخدمتين مع بعض عبر Docker محليًا (اختبار قبل الرفع الفعلي)
+#
+# تشغيل: docker compose up --build
+# إيقاف:  docker compose down
+
+services:
+  gemini-api:
+    build: ./gemini-wa
+    env_file: ./gemini-wa/.env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  whatsapp:
+    build: ./whatsapp-service
+    env_file: ./whatsapp-service/.env
+    environment:
+      # داخل شبكة Docker compose، اسم الخدمة "gemini-api" هو الـ hostname
+      # (يلغي قيمة GEMINI_API_URL الموجودة بملف .env المحلي تبعك)
+      - GEMINI_API_URL=http://gemini-api:8000
+      # نوجّه الجلسة وقاعدة المعرفة لمجلد واحد يسهل ربطه بـ volume دائم
+      - WHATSAPP_AUTH_DIR=/data/auth_info_baileys
+      - KNOWLEDGE_BASE_FILE=/data/knowledge.json
+    depends_on:
+      - gemini-api
+    volumes:
+      # دائم محليًا عبر Docker volume - ما تضيع الجلسة/المعرفة عند إعادة البناء
+      - whatsapp-data:/data
+    restart: unless-stopped
+
+volumes:
+  whatsapp-data:
