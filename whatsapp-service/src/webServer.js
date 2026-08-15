@@ -14,6 +14,7 @@
 
 import express from "express";
 import * as botState from "./botState.js";
+import * as knowledgeBase from "./knowledgeBase.js";
 
 const DASHBOARD_PASSWORD = process.env.WEB_DASHBOARD_PASSWORD || "";
 
@@ -71,8 +72,7 @@ export function startWebServer(getSock) {
   });
 
   // إرسال رسالة يدوية: { to: "رقم أو JID", message: "..." }
-  app.post("/api/send", async (req, res) => {
-    const sock = getSock();
+  app.post("/api/send", async (req, res) => {    const sock = getSock();
     if (!sock) return res.status(503).json({ ok: false, error: "البوت غير متصل حاليًا" });
 
     let { to, message } = req.body;
@@ -94,6 +94,43 @@ export function startWebServer(getSock) {
       res.json({ ok: true, to });
     } catch (err) {
       console.error("❌ فشل إرسال رسالة يدوية:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ===== تدريب البوت (قاعدة المعرفة) =====
+
+  // عرض كل مدخلات قاعدة المعرفة
+  app.get("/api/knowledge", async (req, res) => {
+    try {
+      const entries = await knowledgeBase.listEntries();
+      res.json({ ok: true, entries });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // إضافة مدخل: { question: "...", answer: "..." }
+  app.post("/api/knowledge", async (req, res) => {
+    const { question, answer } = req.body;
+    if (!question || !answer) {
+      return res.status(400).json({ ok: false, error: "الحقول question و answer مطلوبة" });
+    }
+    try {
+      const entry = await knowledgeBase.addEntry(question, answer);
+      console.log(`📚 أُضيف مدخل تدريب جديد من اللوحة (${entry.id})`);
+      res.json({ ok: true, entry });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // حذف مدخل بالـ id
+  app.delete("/api/knowledge/:id", async (req, res) => {
+    try {
+      const removed = await knowledgeBase.removeEntry(req.params.id);
+      res.json({ ok: removed, removed });
+    } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
@@ -186,6 +223,16 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
 
   <div class="card">
+    <h2>🎓 تدريب البوت (قاعدة المعرفة)</h2>
+    <p class="muted">المعلومات هنا يستخدمها البوت عند الرد بالذكاء الاصطناعي (وضع التشغيل).</p>
+    <label>السؤال / الموضوع</label>
+    <input id="kbQuestion" placeholder="مثال: شو أسعار الموقع؟">
+    <label style="margin-top:10px">الجواب</label>
+    <textarea id="kbAnswer" placeholder="مثال: يبدأ من 50$"></textarea>
+    <button class="btn-primary" onclick="addKnowledge()">إضافة معلومة</button>
+    <div class="senders" id="kbList" style="max-height:220px;margin-top:12px"></div>
+  </div>
+  <div class="card">
     <h2>كلمة السر</h2>
     <label>مطلوبة فقط إذا ضبطت WEB_DASHBOARD_PASSWORD</label>
     <input id="password" type="password" placeholder="اتركها فارغة إذا ما في كلمة سر">
@@ -205,6 +252,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     const saved = localStorage.getItem('dashPass');
     if (saved) document.getElementById('password').value = saved;
     refresh();
+    loadKnowledge();
   });
 
   function headers() {
@@ -265,6 +313,48 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     const data = await r.json();
     if (data.ok) { toast('تم التصفير (' + data.cleared + ')'); refresh(); }
     else toast(data.error || 'خطأ', true);
+  }
+
+  async function loadKnowledge() {
+    try {
+      const r = await fetch('/api/knowledge', { headers: headers() });
+      const data = await r.json();
+      if (!data.ok) return;
+      const list = document.getElementById('kbList');
+      list.innerHTML = data.entries.length
+        ? data.entries.map(e =>
+            '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">' +
+            '<span><b>' + escapeHtml(e.question) + '</b> → ' + escapeHtml(e.answer) + '</span>' +
+            '<button class="btn-red" style="margin:0;padding:4px 10px;font-size:12px" onclick="removeKnowledge(\\'' + e.id + '\\')">حذف</button>' +
+            '</div>'
+          ).join('')
+        : '<div style="color:#64748b">لا توجد معلومات بعد</div>';
+    } catch (e) {}
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  async function addKnowledge() {
+    const question = document.getElementById('kbQuestion').value;
+    const answer = document.getElementById('kbAnswer').value;
+    if (!question || !answer) return toast('املأ السؤال والجواب', true);
+    const r = await fetch('/api/knowledge', { method: 'POST', headers: headers(), body: JSON.stringify({ question, answer }) });
+    const data = await r.json();
+    if (data.ok) {
+      toast('تمت إضافة المعلومة');
+      document.getElementById('kbQuestion').value = '';
+      document.getElementById('kbAnswer').value = '';
+      loadKnowledge();
+    } else toast(data.error || 'خطأ', true);
+  }
+
+  async function removeKnowledge(id) {
+    const r = await fetch('/api/knowledge/' + id, { method: 'DELETE', headers: headers() });
+    const data = await r.json();
+    if (data.ok) { toast('تم الحذف'); loadKnowledge(); }
+    else toast('لم يتم الحذف', true);
   }
 
   setInterval(refresh, 10000);
