@@ -18,6 +18,8 @@ import makeWASocket, {
 
 import { config, validateConfig } from "./config.js";
 import { handleIncomingMessage } from "./messageHandler.js";
+import * as botState from "./botState.js";
+import { startWebServer } from "./webServer.js";
 
 // وقت بدء تشغيل هذا السيرفر - أي رسالة "واصلة" بتاريخ أقدم من هذا (مع هامش
 // بسيط للتساهل مع فروق التوقيت) هي غالبًا backlog قديم يعيد WhatsApp تسليمه
@@ -28,12 +30,19 @@ const BACKLOG_GRACE_SECONDS = 30;
 
 const logger = pino({ level: "warn" });
 
+// مرجع مشترك للـ socket الحالي - يتغيّر عند كل إعادة اتصال، لكن لوحة الويب
+// تحتاج دائمًا أحدث نسخة منه لإرسال الرسائل اليدوية.
+let currentSock = null;
+
 async function start() {
   validateConfig();
+
+  const loaded = botState.loadState();
 
   console.log("🔧 إعدادات الربط:");
   console.log(`   الطريقة: ${config.linkMethod === "qr" ? "QR Code" : "Pairing Code"}`);
   console.log(`   مجلد الجلسة: ${config.authDir}`);
+  console.log(`   وضع البوت الحالي: ${loaded.mode === "away" ? "إيقاف (رسالة غياب فقط)" : "مُشغّل (رد ذكي)"}`);
 
   const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
   const { version } = await fetchLatestBaileysVersion();
@@ -46,6 +55,8 @@ async function start() {
     // مهم: نطلب QR نصي عبر connection.update بدل الاعتماد على printQRInTerminal
     // (الخيار القديم لم يعد مدعومًا في إصدارات Baileys الحديثة)
   });
+
+  currentSock = sock; // حدّث المرجع المشترك حتى تستخدمه لوحة الويب
 
   // إذا كانت الطريقة المطلوبة pairing وما زلنا غير مسجّلين، نطلب الكود
   if (config.linkMethod === "pairing" && !sock.authState.creds.registered) {
@@ -124,3 +135,7 @@ start().catch((err) => {
   console.error("❌ فشل بدء تشغيل خدمة WhatsApp:", err);
   process.exit(1);
 });
+
+// لوحة التحكم بالويب تُشغّل مرة واحدة فقط (خارج دورة إعادة الاتصال). تمرر
+// دالة تعيد أحدث نسخة من الـ socket حتى تبقى صالحة بعد أي إعادة اتصال.
+startWebServer(() => currentSock);

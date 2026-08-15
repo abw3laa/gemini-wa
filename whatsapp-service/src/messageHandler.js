@@ -25,6 +25,7 @@ import * as mediaService from "./mediaService.js";
 import { resetMemory } from "./conversationMemory.js";
 import * as knowledgeBase from "./knowledgeBase.js";
 import * as adminCommands from "./adminCommands.js";
+import * as botState from "./botState.js";
 
 const downloadLogger = pino({ level: "warn" });
 
@@ -252,6 +253,20 @@ export async function handleIncomingMessage(sock, msg) {
     ) {
       return; // مجموعة غير مُصرّح لها
     }
+  }
+
+  // وضع الغياب (Away): البوت "مطفّي" - لا Gemini إطلاقًا. يرسل رسالة الغياب
+  // الثابتة مرة واحدة فقط لكل رقم (المسيطر عليها من صفحة الويب). المدراء
+  // يتجاوزون هذا الوضع حتى يبقوا قادرين على التحكم عبر أوامر WhatsApp أيضًا.
+  if (botState.isAwayMode() && !(!isGroup && adminCommands.isAdmin(chatId))) {
+    if (!botState.hasBeenNotified(chatId)) {
+      botState.markNotified(chatId);
+      await sock.sendMessage(chatId, { text: botState.getAwayMessage() });
+      console.log(`💤 وضع الغياب: أرسلنا رسالة الغياب (مرة واحدة) إلى ${chatId}`);
+    } else {
+      console.log(`💤 وضع الغياب: ${chatId} سبق واستلم رسالة الغياب - تجاهلنا`);
+    }
+    return;
   }
 
   // Phase 7: صورة
